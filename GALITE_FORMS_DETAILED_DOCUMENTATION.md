@@ -432,6 +432,10 @@ inner class LayoutBlock : Block("Layout Example", buffer = 1, visible = 1) {
 
 ## Database Integration
 
+### Table Linking and Joins
+
+Galite forms support sophisticated database relationships through table linking and automatic join generation. The framework automatically determines the appropriate join type (INNER or LEFT OUTER) based on column nullability and field definitions.
+
 ### Table Linking
 
 ```kotlin
@@ -512,6 +516,276 @@ object StatusDomain : CodeDomain<String>() {
         "Inactive"  keyOf "I"  
         "Pending"   keyOf "P"
         "Suspended" keyOf "S"
+    }
+}
+```
+
+### Join Types and Column Relationships
+
+#### Inner Join - Standard Foreign Key Relationship
+
+```kotlin
+inner class InnerJoinBlock : Block("Inner Join Example", buffer = 10, visible = 10) {
+    val orders = table(Orders)        // Main table
+    val customers = table(Customers)  // Lookup table
+    val products = table(Products)    // Another lookup table
+    
+    // Inner join: Orders.customerId = Customers.id
+    // Both columns are non-nullable, creates INNER JOIN
+    val customerId = visit(domain = CustomerDomain, position = at(1, 1)) {
+        label = "Customer"
+        help = "Select customer"
+        columns(customers.id, orders.customerId) {
+            priority = 1
+        }
+        
+        trigger(POSTCHG) {
+            // Automatically fetch customer details
+            block.fetchLookupFirst(vField)
+        }
+    }
+    
+    // Display customer name from joined table
+    val customerName = skipped(domain = STRING(100), position = at(1, 2)) {
+        label = "Customer Name"
+        help = "Customer company name"
+        columns(customers.name)
+    }
+    
+    // Multiple column join in single field
+    val productId = visit(domain = ProductDomain, position = at(2, 1)) {
+        label = "Product"
+        help = "Select product"
+        columns(products.id, orders.productId) {
+            priority = 2
+        }
+    }
+    
+    val productName = skipped(domain = STRING(100), position = at(2, 2)) {
+        label = "Product Name"
+        columns(products.name)
+    }
+}
+```
+
+#### Left Outer Join - Nullable Relationships
+
+```kotlin
+inner class LeftJoinBlock : Block("Left Join Example", buffer = 10, visible = 10) {
+    val customers = table(Customers)  // Main table
+    val orders = table(Orders)        // Optional related table
+    val addresses = table(Addresses)  // Another optional table
+    
+    // Left outer join: Customers.id = Orders.customerId (nullable)
+    // Using nullable() wrapper creates LEFT OUTER JOIN
+    val customerId = visit(domain = LONG(10), position = at(1, 1)) {
+        label = "Customer ID"
+        columns(customers.id, nullable(orders.customerId))
+    }
+    
+    val customerName = visit(domain = STRING(100), position = at(1, 2)) {
+        label = "Customer Name"
+        columns(customers.name)
+    }
+    
+    // Order information (may be null if customer has no orders)
+    val orderDate = skipped(domain = DATE, position = at(2, 1)) {
+        label = "Last Order Date"
+        help = "Date of most recent order"
+        columns(orders.orderDate)
+    }
+    
+    // Multiple nullable joins in single field
+    val addressId = visit(domain = LONG(10), position = at(3, 1)) {
+        label = "Address ID"
+        columns(customers.id, nullable(orders.customerId), nullable(addresses.customerId))
+    }
+    
+    val addressLine = skipped(domain = STRING(200), position = at(3, 2)) {
+        label = "Address"
+        columns(addresses.addressLine1)
+    }
+}
+```
+
+#### Complex Multi-Table Joins
+
+```kotlin
+inner class ComplexJoinBlock : Block("Complex Joins", buffer = 20, visible = 10) {
+    val orders = table(Orders)          // Main table
+    val customers = table(Customers)    // Customer lookup
+    val products = table(Products)      // Product lookup
+    val categories = table(Categories)  // Category lookup
+    val suppliers = table(Suppliers)   // Supplier lookup
+    
+    // Hidden field for join coordination
+    val orderId = hidden(domain = LONG(10)) {
+        columns(orders.id)
+    }
+    
+    // Customer information (INNER JOIN)
+    val customerId = visit(domain = CustomerDomain, position = at(1, 1)) {
+        label = "Customer"
+        columns(customers.id, orders.customerId)
+        
+        trigger(POSTCHG) {
+            block.fetchLookupFirst(vField)
+        }
+    }
+    
+    val customerName = skipped(domain = STRING(100), position = at(1, 2)) {
+        label = "Customer Name"
+        columns(customers.name)
+    }
+    
+    // Product with category and supplier (multiple joins)
+    val productId = visit(domain = ProductDomain, position = at(2, 1)) {
+        label = "Product"
+        columns(products.id, orders.productId)
+        
+        trigger(POSTCHG) {
+            block.fetchLookupFirst(vField)
+        }
+    }
+    
+    val productName = skipped(domain = STRING(100), position = at(2, 2)) {
+        label = "Product Name"
+        columns(products.name)
+    }
+    
+    // Category information (through product)
+    val categoryId = hidden(domain = LONG(10)) {
+        columns(categories.id, products.categoryId)
+    }
+    
+    val categoryName = skipped(domain = STRING(50), position = at(3, 1)) {
+        label = "Category"
+        columns(categories.name)
+    }
+    
+    // Supplier information (through product, nullable)
+    val supplierId = hidden(domain = LONG(10)) {
+        columns(suppliers.id, nullable(products.supplierId))
+    }
+    
+    val supplierName = skipped(domain = STRING(100), position = at(3, 2)) {
+        label = "Supplier"
+        columns(suppliers.name)
+    }
+}
+```
+
+#### Join Patterns and Best Practices
+
+```kotlin
+inner class JoinPatternsBlock : Block("Join Patterns", buffer = 10, visible = 10) {
+    val mainTable = table(Orders)
+    val lookupTable1 = table(Customers)
+    val lookupTable2 = table(Products)
+    val optionalTable = table(OrderNotes)
+    
+    // Pattern 1: Simple Foreign Key (INNER JOIN)
+    val customerId = visit(domain = CustomerDomain, position = at(1, 1)) {
+        label = "Customer"
+        // Orders.customerId = Customers.id (both non-null)
+        columns(lookupTable1.id, mainTable.customerId)
+    }
+    
+    // Pattern 2: Optional Relationship (LEFT OUTER JOIN)
+    val noteId = visit(domain = LONG(10), position = at(2, 1)) {
+        label = "Note ID"
+        // Orders.id = OrderNotes.orderId (OrderNotes.orderId can be null)
+        columns(mainTable.id, nullable(optionalTable.orderId))
+    }
+    
+    // Pattern 3: Multiple Join Columns in Single Field
+    val multiJoinField = hidden(domain = LONG(10)) {
+        // Complex join: Orders -> Customers -> CustomerAddresses
+        columns(lookupTable1.id, mainTable.customerId, optionalTable.customerId)
+    }
+    
+    // Pattern 4: Nullable Column Handling
+    val optionalField = visit(domain = STRING(50), position = at(3, 1)) {
+        label = "Optional Field"
+        
+        // Explicitly mark columns as nullable for LEFT OUTER JOIN
+        nullable(lookupTable1.optionalColumn)
+        key(mainTable.primaryKey)  // Mark as key column
+        
+        columns(mainTable.id, nullable(lookupTable1.foreignKey))
+    }
+}
+```
+
+### Advanced Join Techniques
+
+#### Master-Detail with Joins
+
+```kotlin
+inner class OrderMasterBlock : Block("Orders", buffer = 1, visible = 10) {
+    val orders = table(Orders, Orders.id)
+    val customers = table(Customers)
+    val addresses = table(CustomerAddresses)
+    
+    val orderId = visit(domain = LONG(10), position = at(1, 1)) {
+        label = "Order ID"
+        columns(orders.id)
+        
+        trigger(POSTCHG) {
+            loadOrderItems() // Load related detail records
+        }
+    }
+    
+    // Customer with address (multiple joins)
+    val customerId = visit(domain = CustomerDomain, position = at(1, 2)) {
+        label = "Customer"
+        columns(customers.id, orders.customerId)
+    }
+    
+    val customerName = skipped(domain = STRING(100), position = at(2, 1)) {
+        label = "Customer Name"
+        columns(customers.name)
+    }
+    
+    // Billing address (LEFT JOIN - customer may not have address)
+    val billingAddressId = hidden(domain = LONG(10)) {
+        columns(addresses.id, nullable(customers.billingAddressId))
+    }
+    
+    val billingAddress = skipped(domain = STRING(200), position = at(2, 2)) {
+        label = "Billing Address"
+        columns(addresses.fullAddress)
+    }
+}
+
+inner class OrderItemDetailBlock : Block("Order Items", buffer = 50, visible = 15) {
+    val items = table(OrderItems, OrderItems.id)
+    val products = table(Products)
+    val categories = table(Categories)
+    
+    // Hidden master link
+    val orderId = hidden(domain = LONG(10)) {
+        columns(items.orderId)
+    }
+    
+    // Product with category hierarchy
+    val productId = visit(domain = ProductDomain, position = at(1, 1)) {
+        label = "Product"
+        columns(products.id, items.productId)
+        
+        trigger(POSTCHG) {
+            block.fetchLookupFirst(vField)
+        }
+    }
+    
+    // Category (through product)
+    val categoryId = hidden(domain = LONG(10)) {
+        columns(categories.id, products.categoryId)
+    }
+    
+    val categoryName = skipped(domain = STRING(50), position = at(2, 1)) {
+        label = "Category"
+        columns(categories.name)
     }
 }
 ```
